@@ -102,7 +102,11 @@ def send_api():
         return jsonify({"error": f"AIサービスとの通信中にエラーが発生しました。"}), 500
 
 # スクリプトが直接実行された場合にのみ開発サーバーを起動
+#sample
+
 if __name__ == '__main__':
     if not OPENROUTER_API_KEY:
         print("警告: 環境変数 OPENROUTER_API_KEY が設定されていません。API呼び出しは失敗します。")
     app.run(debug=True, host='0.0.0.0', port=5000)
+
+
