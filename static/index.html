@@ -12,21 +12,49 @@
 <body>
 
     <div id="app" class="container">
-        <h2 class="mb-4">サンプルアプリ</h2>
+        <h2 class="mb-4">AIレシピ提案アプリ</h2>
 
-        <div class="mb-3">
-            <label for="inputText" class="form-label">テキストを入力してください:</label>
-            <textarea id="inputText" class="form-control" rows="5" v-model="inputText" placeholder="ここにテキストを入力..."></textarea>
+        <!-- 入力フォーム画面 -->
+        <div v-if="viewState === 'form'">
+            <div class="mb-3">
+                <label for="inputText" class="form-label">使う食材を入力してください（「,」や「、」で区切る）:</label>
+                <textarea id="inputText" class="form-control" rows="5" v-model="inputText" placeholder="例: 豚肉, 玉ねぎ、じゃがいも"></textarea>
+            </div>
+            <div class="mb-3">
+                <button @click="getInitialRecipe" class="btn btn-primary" :disabled="isLoading">
+                    <span v-if="isLoading" class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span>
+                    <span v-else>レシピを提案してもらう</span>
+                </button>
+            </div>
         </div>
 
-        <div class="mb-3">
-            <button @click="execute" class="btn btn-primary">実行</button>
-            <button @click="execute_kansai" class="btn btn-success ms-2">関西弁で実行</button>
-        </div>
-        
-        <h3>結果:</h3>
-        <div class="result-area p-3 border rounded" :class="{ 'alert alert-info': resultText && !resultText.startsWith('エラー:'), 'alert alert-danger': resultText.startsWith('エラー:') }">
-            <pre style="white-space: pre-wrap;">{{ resultText }}</pre>
+        <!-- 結果表示 & 選択画面 -->
+        <div v-else>
+            <h3>{{ resultTitle }}</h3>
+            <!-- レシピ候補の選択画面 -->
+            <div v-if="viewState === 'choice'" class="list-group">
+                 <button v-for="candidate in recipeCandidates" :key="candidate" @click="getRecipeDetail(candidate)" class="list-group-item list-group-item-action" :disabled="isLoading">
+                    {{ candidate }}
+                 </button>
+            </div>
+
+            <!-- レシピ表示画面 -->
+            <div v-if="viewState === 'result'" class="result-area p-3 border rounded" :class="{ 'alert-info': !isError, 'alert-danger': isError }">
+                <pre style="white-space: pre-wrap;">{{ resultText }}</pre>
+            </div>
+
+            <!-- ローディング表示 -->
+            <div v-if="isLoading" class="text-center my-3">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+                <p>{{ loadingText }}</p>
+            </div>
+
+            <div class="mt-4">
+                <button v-if="viewState === 'result'" @click="getMoreCandidates" class="btn btn-success" :disabled="isLoading">別の料理を提案してもらう</button>
+                <button @click="reset" class="btn btn-secondary ms-2" :disabled="isLoading">最初からやり直す</button>
+            </div>
         </div>
     </div>
 
@@ -37,40 +65,91 @@
             data() {
                 return {
                     inputText: '',
-                    resultText: 'ここに結果が表示されます。'
+                    resultText: '',
+                    loadingText: '',
+                    recipeCandidates: [],
+                    viewState: 'form', // 'form', 'result', 'choice'
+                    resultTitle: '結果:',
+                    isLoading: false, // ローディング状態を管理
+                    isError: false    // エラー状態を管理
                 };
             },
             methods: {
-                async sendRequest(context = null) {
-                    this.resultText = '処理中...';
+                // 汎用的なAPIリクエストメソッド
+                async sendApiRequest(context) {
+                    if (this.isLoading) return; // 処理中の多重実行を防止
+                    this.isLoading = true;
+                    this.isError = false;
+
                     try {
-                        const payload = { text: this.inputText };
-                        if (context) {
-                            payload.context = context;
-                        }
+                        // 全角の句点「、」を半角のカンマ「,」に置換して統一する
+                        const ingredients = this.inputText.replace(/、/g, ',');
+
+                        if (ingredients.trim() === '') { throw new Error('食材を入力してください。'); }
 
                         const response = await fetch('/send_api', {
                             method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify(payload)
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ text: ingredients, context: context })
                         });
+
                         const data = await response.json();
                         if (response.ok) {
-                            this.resultText = data.processed_text;
+                            return data.processed_text;
                         } else {
-                            this.resultText = `エラー: ${data.error || '不明なエラーが発生しました。'}`;
+                            throw new Error(data.error || '不明なエラーが発生しました。');
                         }
                     } catch (error) {
+                        this.isError = true;
                         this.resultText = `エラー: ${error.message}`;
+                        this.viewState = 'result'; // エラー表示のためにresultビューに
+                        return null;
+                    } finally {
+                        this.isLoading = false; // 処理が成功しても失敗してもローディングを終了
+                        this.loadingText = '';
                     }
                 },
-                execute() {
-                    this.sendRequest();
+                // 1. 最初のレシピを取得
+                async getInitialRecipe() {
+                    this.loadingText = 'レシピを考案中...';
+                    const context = "あなたはプロの料理研究家です。ユーザーから提供された食材リストを使って作れる料理のアイデアを1つ提案してください。回答には「料理名」と「簡単なレシピ」を必ず含めてください。";
+                    const recipe = await this.sendApiRequest(context);
+                    if (recipe) {
+                        this.resultText = recipe;
+                        this.resultTitle = "AIからの最初の提案";
+                        this.viewState = 'result';
+                    }
                 },
-                execute_kansai() {
-                    this.sendRequest("あなたは親切な関西人です。ユーザーからの入力に対して、必ず関西弁で、親しみやすく、そして140字以内で回答してください。");
+                // 2. 別の料理候補を取得
+                async getMoreCandidates() {
+                    this.loadingText = '別の候補を探しています...';
+                    this.resultTitle = "他の候補はこちら";
+                    const context = `ユーザーが入力した「${this.inputText}」を主要な食材として使った、先ほど提案した料理以外の料理名を5つ提案してください。追加で一般的に手に入りやすい食材を3〜5品使っても構いません。料理名のみを回答し、説明や番号は不要です。各料理名は改行で区切ってください。`;
+                    const candidatesText = await this.sendApiRequest(context);
+                    if (candidatesText) {
+                        // AIの返答から料理名だけを抽出（空行などを除去）
+                        this.recipeCandidates = candidatesText.split('\n').map(name => name.replace(/^\d+\.\s*/, '').trim()).filter(name => name);
+                        this.viewState = 'choice';
+                    }
+                },
+                // 3. 選択した料理の詳細レシピを取得
+                async getRecipeDetail(recipeName) {
+                    this.loadingText = `「${recipeName}」のレシピを準備中...`;
+                    const context = `あなたはプロの料理研究家です。「${recipeName}」の簡単なレシピを教えてください。回答には「料理名」と「簡単なレシピ」を必ず含めてください。`;
+                    const recipe = await this.sendApiRequest(context);
+                    if (recipe) {
+                        this.resultText = recipe;
+                        this.resultTitle = `「${recipeName}」のレシピ`;
+                        this.viewState = 'result';
+                    }
+                },
+                // 4. 最初からやり直す
+                reset() {
+                    this.inputText = '';
+                    this.resultText = '';
+                    this.recipeCandidates = [];
+                    this.viewState = 'form';
+                    this.isError = false;
                 }
             }
         }).mount('#app');

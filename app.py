@@ -29,6 +29,19 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 SITE_URL = os.getenv("YOUR_SITE_URL", "http://localhost:5000") # Default if not set
 APP_NAME = os.getenv("YOUR_APP_NAME", "FlaskVueApp") # Default if not set
 
+# OpenAI Clientの初期化
+# アプリケーション起動時に一度だけクライアントを初期化する
+client = None
+if OPENROUTER_API_KEY:
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=OPENROUTER_API_KEY,
+        default_headers={ # Recommended by OpenRouter
+            "HTTP-Referer": SITE_URL,
+            "X-Title": APP_NAME,
+        }
+    )
+
 # URL:/ に対して、static/index.htmlを表示して
     # クライアントサイドのVue.jsアプリケーションをホストする
 @app.route('/')
@@ -38,19 +51,9 @@ def index():
 # URL:/send_api に対するメソッドを定義
 @app.route('/send_api', methods=['POST'])
 def send_api():
-    if not OPENROUTER_API_KEY:
+    if not client:
         app.logger.error("OpenRouter API key not configured.")
         return jsonify({"error": "OpenRouter API key is not configured on the server."}), 500
-
-    client = OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=OPENROUTER_API_KEY,
-        default_headers={ # Recommended by OpenRouter
-            "HTTP-Referer": SITE_URL,
-            "X-Title": APP_NAME,
-        }
-    )
-    
     # POSTリクエストからJSONデータを取得
     data = request.get_json()
 
